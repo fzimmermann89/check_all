@@ -188,7 +188,7 @@ def check_all_in_paths(paths: list[Path], line_length: int, use_double_quotes: b
 def main():
     parser = argparse.ArgumentParser(description='Check and update __all__ in __init__.py files.')
     parser.add_argument('paths', nargs='*', default=['.'], help='Paths to the directories or __init__.py files to check (default: current directory)')
-    parser.add_argument('--line-length', type=int, default=80, help='Maximum line length for __all__ (default: 80)')
+    parser.add_argument('--line-length', type=int, default=80, help='Maximum line length for __all__')
     parser.add_argument('--double-quotes', action='store_true', help='Use double quotes for __all__ instead of single quotes')
     args = parser.parse_args()
 
