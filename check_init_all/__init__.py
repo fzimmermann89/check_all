@@ -27,7 +27,6 @@ def get_all_imports(filepath: Path) -> set[str]:
         if isinstance(node, ast.Import):
             # For standard imports like import x
             for alias in node.names:
-                # Only add the alias name, not the module
                 imports.add(alias.asname or alias.name)
         elif isinstance(node, ast.ImportFrom):
             # For from x import y statements
@@ -40,8 +39,10 @@ def get_all_imports(filepath: Path) -> set[str]:
                     # Same handling for relative imports
                     imports.add(alias.asname or alias.name)
 
-    return imports
+    # Remove any full module paths (if they exist in the imports)
+    imports = {name.split('.')[-1] for name in imports}
 
+    return imports
 
 
 
