@@ -120,7 +120,8 @@ def update_all_in_init(filepath: Path, line_length: int = 79, use_double_quotes:
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets):
-            all_var = {elt.s for elt in node.value.elts}
+            all_var = [elt.s for elt in node.value.elts]
+            import ipdb; ipdb.set_trace()
             all_lineno = node.lineno
             all_start = node.lineno - 1 
             all_end = node.end_lineno - 1 if hasattr(node, "end_lineno") else all_start
@@ -135,14 +136,45 @@ def update_all_in_init(filepath: Path, line_length: int = 79, use_double_quotes:
         new_all = sorted(imports)
         with filepath.open('a') as file:
             file.write(f"\n{format_all_string(new_all, line_length, use_double_quotes)}\n")
-        print(f"Creating __all__ in {filepath}")
+        print(f"{filepath}\033[31m error:\033[0m missing __all__") 
         return
 
-    missing = sorted(imports - all_var - noqa_symbols)
-    extra = sorted(all_var - imports - noqa_symbols)
-    sorted_all_var = sorted(all_var)
+    missing = sorted(imports - set(all_var) - noqa_symbols)
+    extra = sorted(set(all_var) - imports - noqa_symbols)
+    is_sorted = all_var == sorted(all_var)
+    print(all_var, sorted(all_var), is_sorted)
+    import ipdb; ipdb.set_trace()
+    print_errors(filepath, all_lineno, is_sorted, missing, extra)
+    updated_all = sorted(set(all_var) | set(missing) - set(extra))
 
-    if list(all_var) != sorted_all_var:
+    all_string = format_all_string(updated_all, line_length, use_double_quotes)
+
+    if not is_sorted or missing or extra:
+        lines = source.splitlines()
+        lines[all_start:all_end + 1] = [all_string]
+        with filepath.open('w') as file:
+            file.write("\n".join(lines))
+        print(f"Updated __all__ in {filepath}")
+
+def print_errors(filepath: Path, all_lineno: int, is_sorted:bool, missing:set, extra:set) -> None:
+    """
+    Print the errors and notes in the format similar to MyPy.
+
+    Parameters
+    ----------
+    filepath
+        The path to the __init__.py file being processed.
+    all_lineno
+        The line number where __all__ is defined.
+    all_var
+        The current set of symbols in __all__.
+    imports
+        The set of imports found in the file.
+    """
+    errors = []
+
+
+    if not is_sorted:
         errors.append("Error: __all__ is not sorted alphabetically.")
 
     if missing:
@@ -151,26 +183,14 @@ def update_all_in_init(filepath: Path, line_length: int = 79, use_double_quotes:
     if extra:
         errors.append(f"Error: Extra symbols in __all__: {extra}")
 
+    for error in errors:
+        print(f"{filepath}:{all_lineno}:\033[31m error:\033[0m {error}")  
+
     if errors:
-        print(f"Errors found in {filepath}:")
-        for error in errors:
-            print(error)
-
         ignored_symbols = sorted(set(missing + extra))
-        noqa_suggestion = f"ALL[{','.join(ignored_symbols)}]" if ignored_symbols else "ALL"
-        print(f"\nYou can silence specific errors by using `# noqa: {noqa_suggestion}` "
-              "on the __all__ line, or `# noqa: ALL` to ignore the entire __all__ validation.\n")
-
-    updated_all = sorted(all_var | set(missing) - set(extra))
-
-    all_string = format_all_string(updated_all, line_length, use_double_quotes)
-
-    if updated_all != sorted_all_var or missing or extra:
-        lines = source.splitlines()
-        lines[all_start:all_end + 1] = [all_string]
-        with filepath.open('w') as file:
-            file.write("\n".join(lines))
-        print(f"Updated __all__ in {filepath}")
+        noqa_suggestion = f"ALL[{','.join(ignored_symbols)}]" if ignored_symbols else "ALL[symbol_name]"
+        print(f"{filepath}:{all_lineno}:\033[34m note\033[0m: You can silence specific errors by using `# noqa: {noqa_suggestion}` "
+              "on the __all__ line, or `# noqa: ALL` to ignore the entire __all__ validation.")  
 
 
 def check_all_in_paths(paths: list[Path], line_length: int, use_double_quotes: bool) -> None:
