@@ -25,17 +25,23 @@ def get_all_imports(filepath: Path) -> set[str]:
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
+            # For standard imports like import x
             for alias in node.names:
-                imports.add(alias.asname or alias.name.split('.')[0])
+                # Only add the alias name, not the module
+                imports.add(alias.asname or alias.name)
         elif isinstance(node, ast.ImportFrom):
+            # For from x import y statements
             if node.level == 0 and node.module:  # Normal imports like from x import y
                 for alias in node.names:
+                    # Add only the names being imported, not the module name
                     imports.add(alias.asname or alias.name)
             elif node.level > 0:  # Relative imports, like from .module import x
                 for alias in node.names:
                     imports.add(alias.asname or alias.name)
 
     return imports
+
+
 
 def parse_noqa(comment: str) -> set[str] | str | None:
     """
@@ -109,13 +115,12 @@ def update_all_in_init(filepath: Path, line_length: int = 79, use_double_quotes:
     all_var, all_lineno, noqa_symbols, errors = None, None, set(), []
     all_start, all_end = None, None
 
-    # Look for the __all__ variable and its location in the file
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets):
             all_var = {elt.s for elt in node.value.elts}
             all_lineno = node.lineno
-            all_start = node.lineno - 1  # Index for the start of the __all__ block
-            all_end = node.end_lineno - 1 if hasattr(node, "end_lineno") else all_start  # Handle multiline __all__
+            all_start = node.lineno - 1 
+            all_end = node.end_lineno - 1 if hasattr(node, "end_lineno") else all_start
             source_lines = source.splitlines()
             parsed_noqa = parse_noqa(source_lines[all_lineno - 1])
             if parsed_noqa == "ALL":
