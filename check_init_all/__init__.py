@@ -151,7 +151,6 @@ def update_all_in_init(filepath: Path, line_length: int = 79, use_double_quotes:
         lines[all_start:all_end + 1] = [all_string]
         with filepath.open('w') as file:
             file.write("\n".join(lines))
-        print(f"Updated __all__ in {filepath}")
 
 def print_errors(filepath: Path, all_lineno: int, is_sorted:bool, missing:set, extra:set) -> None:
     """
@@ -185,10 +184,8 @@ def print_errors(filepath: Path, all_lineno: int, is_sorted:bool, missing:set, e
 
     if errors:
         ignored_symbols = sorted(set(missing + extra))
-        noqa_suggestion = f"ALL[{','.join(ignored_symbols)}]" if ignored_symbols else "ALL[symbol_name]"
-        print(f"{filepath}:{all_lineno}:\033[34m note\033[0m: You can silence specific errors by using `# noqa: {noqa_suggestion}` "
-              "on the __all__ line, or `# noqa: ALL` to ignore the entire __all__ validation.")  
-
+        noqa_suggestion = f"ALL[{','.join(ignored_symbols)}]" if ignored_symbols else "ALL"
+        print(f"{filepath}:{all_lineno}:\033[34m note\033[0m: You can silence this  error by using `# noqa: {noqa_suggestion}` ")
 
 def check_all_in_paths(paths: list[Path], line_length: int, use_double_quotes: bool) -> None:
     """

@@ -4,13 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "check_init_all"
-version = "0.1.0"
+version = "1.0.0"
 description = "A package to check and update __all__ in __init__.py files."
 readme = "README.md"
-authors = [
-    { name = "Felix Zimmermann", email = "fzimmermann89@gmail.com" }, # Replace with your name and email
-]
-keywords = ["__all__", "pre-commit"] # Adjust as needed
+authors = [{ name = "Felix Zimmermann", email = "fzimmermann89@gmail.com" }]
+keywords = ["__all__", "pre-commit"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -18,4 +16,4 @@ classifiers = [
 ]
 
 [project.scripts]
-check-init-all = "check_init_all:main" # Adjust according to your script entry point
+check-init-all = "check_init_all:main"
