@@ -142,8 +142,11 @@ def check_all_in_paths(paths: list[Path]) -> None:
         else:
             print(f"Warning: {path} is not a valid file or directory.")
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description='Check and update __all__ in __init__.py files.')
     parser.add_argument('paths', nargs='*', default=['.'], help='Paths to the directories or __init__.py files to check (default: current directory)')
     args = parser.parse_args()
     check_all_in_paths([Path(p) for p in args.paths])
+
+if __name__ == "__main__":
+    main()
