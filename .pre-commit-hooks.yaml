@@ -1,7 +1,7 @@
 - id: check-init-all
   name: Check and Update __all__ in __init__.py
   description: Check if __all__ is properly defined in __init__.py files and updates it if necessary.
-  entry: python check_init_all.py
+  entry: check-init-all
   language: python
   types: [python]
-  files: ^__init__.py$
+  #files: ^__init__.py$

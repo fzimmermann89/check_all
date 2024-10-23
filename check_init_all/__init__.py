@@ -7,7 +7,7 @@ NOQA_ALL_PATTERN = re.compile(r"# noqa: ALL(\[([a-zA-Z0-9_, ]+)\])?")
 
 def get_all_imports(filepath: Path) -> set[str]:
     """
-    Parse a Python file to extract all import statements.
+    Parse a Python file to extract all symbols from import statements that should be included in __all__.
 
     Parameters
     ----------
@@ -16,17 +16,24 @@ def get_all_imports(filepath: Path) -> set[str]:
 
     Returns
     -------
-    A set of unique import names found in the file.
+    A set of unique import symbols to be included in __all__.
     """
     with filepath.open('r') as file:
         tree = ast.parse(file.read(), filename=str(filepath))
 
     imports = set()
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            imports.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imports.add(node.module)
+            for alias in node.names:
+                imports.add(alias.asname or alias.name.split('.')[0])
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0 and node.module:  # Normal imports like from x import y
+                for alias in node.names:
+                    imports.add(alias.asname or alias.name)
+            elif node.level > 0:  # Relative imports, like from .module import x
+                for alias in node.names:
+                    imports.add(alias.asname or alias.name)
 
     return imports
 
@@ -142,8 +149,11 @@ def check_all_in_paths(paths: list[Path]) -> None:
         else:
             print(f"Warning: {path} is not a valid file or directory.")
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description='Check and update __all__ in __init__.py files.')
     parser.add_argument('paths', nargs='*', default=['.'], help='Paths to the directories or __init__.py files to check (default: current directory)')
     args = parser.parse_args()
     check_all_in_paths([Path(p) for p in args.paths])
+
+if __name__ == "__main__":
+    main()
