@@ -33,13 +33,15 @@ def get_all_imports(filepath: Path) -> set[str]:
             # For from x import y statements
             if node.level == 0 and node.module:  # Normal imports like from x import y
                 for alias in node.names:
-                    # Add only the names being imported, not the module name
+                    # Add only the name being imported, not the full module path
                     imports.add(alias.asname or alias.name)
             elif node.level > 0:  # Relative imports, like from .module import x
                 for alias in node.names:
+                    # Same handling for relative imports
                     imports.add(alias.asname or alias.name)
 
     return imports
+
 
 
 
