@@ -24,11 +24,13 @@ This is a script and pre-commit hook to check and update the `__all__` variable 
        rev: master
        hooks:
          - id: check-init-all
-           name: Check and update __all__ in __init__.py
-           entry: python scripts/check_all.py
-           language: python
-           types: [python]
-           stages: [commit]
    ```
 
 Now, on each commit, the hook will automatically check your `__init__.py` files.
+
+## Arguments
+
+- --line-length (default 120)
+    set maximum line length
+- --double-quotes
+    use double quotes instead of single quotes
