@@ -83,7 +83,7 @@ def format_all_string(symbols: list[str], line_length: int, use_double_quotes: b
     return f"__all__ = [\n    {formatted_symbols}\n]"
 
 
-def update_all_in_init(filepath: Path, line_length: int, use_double_quotes: bool) -> None:
+def update_all_in_init(filepath: Path, line_length: int = 79, use_double_quotes: bool = True) -> None:
     """
     Validate and update the __all__ variable in a given __init__.py file.
 
@@ -96,9 +96,9 @@ def update_all_in_init(filepath: Path, line_length: int, use_double_quotes: bool
     filepath
         The path to the __init__.py file to validate and update.
     line_length
-        Maximum line length for the __all__ string.
+        The maximum allowed length of a line before wrapping the __all__ string.
     use_double_quotes
-        Whether to use double quotes for __all__ or not.
+        If True, use double quotes for the __all__ string, otherwise use single quotes.
     """
     with filepath.open('r') as file:
         source = file.read()
@@ -107,11 +107,15 @@ def update_all_in_init(filepath: Path, line_length: int, use_double_quotes: bool
     imports = get_all_imports(filepath)
 
     all_var, all_lineno, noqa_symbols, errors = None, None, set(), []
+    all_start, all_end = None, None
 
+    # Look for the __all__ variable and its location in the file
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets):
             all_var = {elt.s for elt in node.value.elts}
             all_lineno = node.lineno
+            all_start = node.lineno - 1  # Index for the start of the __all__ block
+            all_end = node.end_lineno - 1 if hasattr(node, "end_lineno") else all_start  # Handle multiline __all__
             source_lines = source.splitlines()
             parsed_noqa = parse_noqa(source_lines[all_lineno - 1])
             if parsed_noqa == "ALL":
@@ -121,9 +125,8 @@ def update_all_in_init(filepath: Path, line_length: int, use_double_quotes: bool
 
     if all_var is None:
         new_all = sorted(imports)
-        formatted_all = format_all_string(new_all, line_length, use_double_quotes)
         with filepath.open('a') as file:
-            file.write(f"\n{formatted_all}\n")
+            file.write(f"\n__all__ = {format_all_string(new_all, line_length, use_double_quotes)}\n")
         print(f"Creating __all__ in {filepath}")
         return
 
@@ -150,15 +153,17 @@ def update_all_in_init(filepath: Path, line_length: int, use_double_quotes: bool
         print(f"\nYou can silence specific errors by using `# noqa: {noqa_suggestion}` "
               "on the __all__ line, or `# noqa: ALL` to ignore the entire __all__ validation.\n")
 
-    updated_all = sorted(all_var.union(missing) - set(extra))
+    updated_all = sorted(all_var | set(missing) - set(extra))
+
+    all_string = format_all_string(updated_all, line_length, use_double_quotes)
 
     if updated_all != sorted_all_var or missing or extra:
-        all_string = format_all_string(updated_all, line_length, use_double_quotes)
         lines = source.splitlines()
-        lines[all_lineno - 1] = all_string
+        lines[all_start:all_end + 1] = [all_string]
         with filepath.open('w') as file:
             file.write("\n".join(lines))
         print(f"Updated __all__ in {filepath}")
+
 
 def check_all_in_paths(paths: list[Path], line_length: int, use_double_quotes: bool) -> None:
     """
