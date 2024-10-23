@@ -150,7 +150,7 @@ def update_all_in_init(filepath: Path, line_length: int, use_double_quotes: bool
         print(f"\nYou can silence specific errors by using `# noqa: {noqa_suggestion}` "
               "on the __all__ line, or `# noqa: ALL` to ignore the entire __all__ validation.\n")
 
-    updated_all = sorted(all_var | missing - set(extra))
+    updated_all = sorted(all_var.union(missing) - set(extra))
 
     if updated_all != sorted_all_var or missing or extra:
         all_string = format_all_string(updated_all, line_length, use_double_quotes)
