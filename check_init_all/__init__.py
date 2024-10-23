@@ -121,7 +121,6 @@ def update_all_in_init(filepath: Path, line_length: int = 79, use_double_quotes:
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets):
             all_var = [elt.s for elt in node.value.elts]
-            import ipdb; ipdb.set_trace()
             all_lineno = node.lineno
             all_start = node.lineno - 1 
             all_end = node.end_lineno - 1 if hasattr(node, "end_lineno") else all_start
@@ -142,8 +141,6 @@ def update_all_in_init(filepath: Path, line_length: int = 79, use_double_quotes:
     missing = sorted(imports - set(all_var) - noqa_symbols)
     extra = sorted(set(all_var) - imports - noqa_symbols)
     is_sorted = all_var == sorted(all_var)
-    print(all_var, sorted(all_var), is_sorted)
-    import ipdb; ipdb.set_trace()
     print_errors(filepath, all_lineno, is_sorted, missing, extra)
     updated_all = sorted(set(all_var) | set(missing) - set(extra))
 
