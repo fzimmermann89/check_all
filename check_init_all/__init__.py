@@ -126,7 +126,7 @@ def update_all_in_init(filepath: Path, line_length: int = 79, use_double_quotes:
     if all_var is None:
         new_all = sorted(imports)
         with filepath.open('a') as file:
-            file.write(f"\n__all__ = {format_all_string(new_all, line_length, use_double_quotes)}\n")
+            file.write(f"\n{format_all_string(new_all, line_length, use_double_quotes)}\n")
         print(f"Creating __all__ in {filepath}")
         return
 
