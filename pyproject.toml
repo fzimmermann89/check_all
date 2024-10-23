@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "check_init_all"
+version = "1.0.0"
+description = "A package to check and update __all__ in __init__.py files."
+readme = "README.md"
+authors = [{ name = "Felix Zimmermann", email = "fzimmermann89@gmail.com" }]
+keywords = ["__all__", "pre-commit"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.scripts]
+check-init-all = "check_init_all:main"
