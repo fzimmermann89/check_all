@@ -4,4 +4,4 @@
   entry: check-init-all
   language: python
   types: [python]
-  #files: ^__init__.py$
+  files: __init__.py$
