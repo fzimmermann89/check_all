@@ -74,17 +74,14 @@ def format_all_string(symbols: list[str], line_length: int, use_double_quotes: b
     A formatted string representing the __all__ list.
     """
     quote_char = '"' if use_double_quotes else "'"
-    all_decl = f"__all__ = {quote_char}["
-    
-    all_items = [f"{quote_char}{symbol}{quote_char}" for symbol in symbols]
-    
+    all_decl = "__all__ = ["
+    all_items = [f"{quote_char}{symbol}{quote_char}" for symbol in symbols]    
     if len(all_decl) + len(', '.join(all_items)) + 2 <= line_length:
-        # If everything fits in one line, return it in a single line
-        return f"{all_decl}{', '.join(all_items)}]{quote_char}"
+        return f"{all_decl}{', '.join(all_items)}]"
 
-    # Otherwise, split the symbols into multiple lines
     formatted_symbols = ",\n    ".join(all_items)
-    return f"__all__ = {quote_char}[\n    {formatted_symbols}\n]{quote_char}"
+    return f"__all__ = [\n    {formatted_symbols}\n]"
+
 
 def update_all_in_init(filepath: Path, line_length: int, use_double_quotes: bool) -> None:
     """
