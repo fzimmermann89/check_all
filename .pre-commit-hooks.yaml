@@ -5,3 +5,4 @@
   language: python
   types: [python]
   files: __init__.py$
+  args: [--fix]
