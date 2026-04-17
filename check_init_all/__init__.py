@@ -122,7 +122,7 @@ def update_all_in_init(filepath: Path, line_length: int = 79, use_double_quotes:
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets):
-            all_var = [elt.s for elt in node.value.elts]
+            all_var = [elt.value if isinstance(elt, ast.Constant) else elt.s for elt in node.value.elts]
             all_lineno = node.lineno
             all_start = node.lineno - 1 
             all_end = node.end_lineno - 1 if hasattr(node, "end_lineno") else all_start
