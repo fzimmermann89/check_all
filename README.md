@@ -20,7 +20,7 @@ This is a script and pre-commit hook to check and update the `__all__` variable 
 
    ```yaml
    repos:
-     - repo: https://github.com/yourusername/your-repo
+     - repo: https://github.com/fzimmermann89/check_all
        rev: master
        hooks:
          - id: check-init-all
@@ -34,3 +34,13 @@ Now, on each commit, the hook will automatically check your `__init__.py` files.
     set maximum line length
 - --double-quotes
     use double quotes instead of single quotes
+
+## Compatibility with ruff
+
+The output of `--fix` is formatted to be stable under `ruff format`: single quotes
+by default (use `--double-quotes` to change), a magic trailing comma keeps
+multi-line `__all__` lists one-entry-per-line, and lines are wrapped at 120
+characters (configurable via `--line-length`). Symbols are sorted isort-style,
+matching ruff's `RUF022` rule (constants, then classes, then other names, with
+natural sorting of digits). To avoid rewrite conflicts, place this hook before
+the ruff hooks in your `.pre-commit-config.yaml`.
