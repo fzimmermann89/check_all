@@ -148,7 +148,7 @@ def preserve_all_comments(
     for comment in comments:
         lineno = comment.start[0]
         previous = [elt for elt in node.value.elts if elt.lineno <= lineno <= elt.end_lineno]
-        if lineno == node.end_lineno:
+        if lineno == node.end_lineno and (lineno != node.lineno or not parse_noqa(comment.string)):
             closing.append(comment.string)
         elif lineno == node.lineno and (not previous or parse_noqa(comment.string)):
             opening.append(comment.string)
@@ -166,6 +166,8 @@ def preserve_all_comments(
                 orphaned.append(comment.string)
 
     lines = all_string.splitlines()
+    if closing and node.lineno != node.end_lineno and len(lines) == 1:
+        lines = ["__all__ = [", "]"]
     if before or after or orphaned:
         if not symbols:
             lines = ["__all__ = [", "]"]
@@ -223,7 +225,7 @@ def update_all_in_init(
             all_end = node.end_lineno - 1 if hasattr(node, "end_lineno") else all_start
             comments = get_all_comments(source, node)
             for comment in comments:
-                if comment.start[0] in (node.lineno, node.end_lineno):
+                if comment.start[0] == node.lineno:
                     parsed_noqa = parse_noqa(comment.string)
                     if parsed_noqa == "ALL":
                         return
