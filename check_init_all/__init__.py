@@ -1,25 +1,33 @@
 import ast
+import io
 import re
+import tokenize
 from pathlib import Path
 import argparse
 
 NOQA_ALL_PATTERN = re.compile(r"# noqa: ALL(\[([a-zA-Z0-9_, ]+)\])?")
 
 
-def _isort_key(name: str) -> tuple[int, tuple[tuple[int, int | str], ...]]:
+def _isort_key(name: str) -> tuple[int, tuple[tuple[int | str, ...], ...]]:
     """Sort key reproducing ruff's RUF022 "isort-style" ordering.
 
     Category first (SCREAMING_CASE constants, then CamelCase classes, then everything else),
     then a natural sort within the category (digit runs compared numerically).
     """
-    if len(name) > 1 and name.isupper():
+    if len(name.encode('utf-8')) > 1 and name.isupper():
         category = 0
     elif name[:1].isupper():
         category = 1
     else:
         category = 2
-    natural = tuple((0, int(part)) if part.isdigit() else (1, part) for part in re.split(r"(\d+)", name) if part)
-    return category, natural
+    natural = []
+    for part in re.findall(r"[0-9]+|[^0-9]", name):
+        if part[0] in "123456789":
+            natural.append((ord('1'), len(part), part))
+        else:
+            # Ruff compares digit runs starting with zero lexicographically.
+            natural.append((ord(part[0]), part))
+    return category, tuple(natural)
 
 
 def get_all_imports(filepath: Path) -> set[str]:
@@ -103,6 +111,8 @@ def format_all_string(symbols: list[str], line_length: int, use_double_quotes: b
     -------
     A formatted string representing the __all__ list.
     """
+    if not symbols:
+        return "__all__ = []"
     quote_char = '"' if use_double_quotes else "'"
     all_decl = "__all__ = ["
     all_items = [f"{quote_char}{symbol}{quote_char}" for symbol in symbols]
@@ -112,6 +122,67 @@ def format_all_string(symbols: list[str], line_length: int, use_double_quotes: b
 
     formatted_symbols = ",\n    ".join(all_items)
     return f"__all__ = [\n    {formatted_symbols},\n]"
+
+
+def get_all_comments(source: str, node: ast.AST) -> list[tokenize.TokenInfo]:
+    """Collect comments belonging to the declaration, excluding later statements."""
+    lines = source.splitlines()
+    comments = []
+    for token in tokenize.generate_tokens(io.StringIO(source).readline):
+        if token.type != tokenize.COMMENT or not node.lineno <= token.start[0] <= node.end_lineno:
+            continue
+        if token.start[0] == node.end_lineno:
+            end_column = len(lines[node.end_lineno - 1].encode('utf-8')[:node.end_col_offset].decode('utf-8'))
+            if lines[node.end_lineno - 1][end_column:token.start[1]].strip(' ;\t'):
+                continue
+        comments.append(token)
+    return comments
+
+
+def preserve_all_comments(
+    all_string: str, symbols: list[str], node: ast.Assign, comments: list[tokenize.TokenInfo]
+) -> str:
+    """Keep boundary comments and move element comments with their symbols."""
+    opening, closing, orphaned = [], [], []
+    before, after = {}, {}
+    for comment in comments:
+        lineno = comment.start[0]
+        previous = [elt for elt in node.value.elts if elt.lineno <= lineno <= elt.end_lineno]
+        if lineno == node.end_lineno:
+            closing.append(comment.string)
+        elif lineno == node.lineno and (not previous or parse_noqa(comment.string)):
+            opening.append(comment.string)
+        elif previous:
+            symbol = previous[-1].value
+            if symbol in symbols:
+                after.setdefault(symbol, []).append(comment.string)
+            else:
+                orphaned.append(comment.string)
+        else:
+            following = next((elt for elt in node.value.elts if elt.lineno > lineno), None)
+            if following is not None and following.value in symbols:
+                before.setdefault(following.value, []).append(comment.string)
+            else:
+                orphaned.append(comment.string)
+
+    lines = all_string.splitlines()
+    if before or after or orphaned:
+        if not symbols:
+            lines = ["__all__ = [", "]"]
+        decorated = [lines[0]]
+        for symbol, line in zip(symbols, lines[1:-1]):
+            decorated.extend('    ' + comment for comment in before.get(symbol, []))
+            inline = after.get(symbol, [])
+            decorated.extend('    ' + comment for comment in inline[1:])
+            decorated.append(line + ('  ' + inline[0] if inline else ''))
+        decorated.extend('    ' + comment for comment in orphaned)
+        decorated.append(lines[-1])
+        lines = decorated
+    if opening:
+        lines[0] += '  ' + ' '.join(opening)
+    if closing:
+        lines[-1] += '  ' + ' '.join(closing)
+    return '\n'.join(lines)
 
 
 def update_all_in_init(
@@ -150,11 +221,14 @@ def update_all_in_init(
             all_lineno = node.lineno
             all_start = node.lineno - 1
             all_end = node.end_lineno - 1 if hasattr(node, "end_lineno") else all_start
-            source_lines = source.splitlines()
-            parsed_noqa = parse_noqa(source_lines[all_lineno - 1])
-            if parsed_noqa == "ALL":
-                return
-            noqa_symbols = parsed_noqa if parsed_noqa else set()
+            comments = get_all_comments(source, node)
+            for comment in comments:
+                if comment.start[0] in (node.lineno, node.end_lineno):
+                    parsed_noqa = parse_noqa(comment.string)
+                    if parsed_noqa == "ALL":
+                        return
+                    if parsed_noqa:
+                        noqa_symbols.update(parsed_noqa)
             break
 
     if all_var is None:
@@ -177,11 +251,13 @@ def update_all_in_init(
 
     if fix and (not is_sorted or missing or extra):
         lines = source.splitlines()
-        comment = re.search(r"\s+#.*$", lines[all_start])
-        if comment:
-            first, *rest = all_string.split("\n")
-            all_string = "\n".join([first + comment.group(0), *rest])
-        lines[all_start : all_end + 1] = [all_string]
+        if comments:
+            all_string = preserve_all_comments(all_string, updated_all, node, comments)
+        prefix = lines[all_start].encode('utf-8')[:node.col_offset].decode('utf-8')
+        suffix = lines[all_end].encode('utf-8')[node.end_col_offset:].decode('utf-8')
+        if any(comment.start[0] == node.end_lineno for comment in comments):
+            suffix = ''
+        lines[all_start : all_end + 1] = [prefix + all_string + suffix]
         # normalize to exactly one blank line before __all__ (like ruff format)
         pre = all_start
         while pre > 0 and lines[pre - 1].strip() == "":

@@ -1,6 +1,6 @@
 # Check __init__.py __all__
 
-This is a script and pre-commit hook to check and update the `__all__` variable in `__init__.py` files.
+Check and update `__all__` in `__init__.py` files with a script or pre-commit hook.
 
 ## Installation in pre-commit
 
@@ -26,21 +26,13 @@ This is a script and pre-commit hook to check and update the `__all__` variable 
          - id: check-init-all
    ```
 
-Now, on each commit, the hook will automatically check your `__init__.py` files.
-
 ## Arguments
 
-- --line-length (default 120)
-    set maximum line length
-- --double-quotes
-    use double quotes instead of single quotes
+- `--line-length N`: maximum line length (default 120).
+- `--double-quotes`: use double quotes instead of single quotes.
 
-## Compatibility with ruff
+## Ruff
 
-The output of `--fix` is formatted to be stable under `ruff format`: single quotes
-by default (use `--double-quotes` to change), a magic trailing comma keeps
-multi-line `__all__` lists one-entry-per-line, and lines are wrapped at 120
-characters (configurable via `--line-length`). Symbols are sorted isort-style,
-matching ruff's `RUF022` rule (constants, then classes, then other names, with
-natural sorting of digits). To avoid rewrite conflicts, place this hook before
-the ruff hooks in your `.pre-commit-config.yaml`.
+Place this hook before Ruff. Sorting follows `RUF022`; multiline lists use
+trailing commas. Pass `--double-quotes` to match Ruff's default, or configure
+Ruff with `quote-style = "single"`.
