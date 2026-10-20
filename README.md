@@ -1,6 +1,6 @@
 # Check __init__.py __all__
 
-This is a script and pre-commit hook to check and update the `__all__` variable in `__init__.py` files.
+Check and update `__all__` in `__init__.py` files with a script or pre-commit hook.
 
 ## Installation in pre-commit
 
@@ -20,17 +20,19 @@ This is a script and pre-commit hook to check and update the `__all__` variable 
 
    ```yaml
    repos:
-     - repo: https://github.com/yourusername/your-repo
+     - repo: https://github.com/fzimmermann89/check_all
        rev: master
        hooks:
          - id: check-init-all
    ```
 
-Now, on each commit, the hook will automatically check your `__init__.py` files.
-
 ## Arguments
 
-- --line-length (default 120)
-    set maximum line length
-- --double-quotes
-    use double quotes instead of single quotes
+- `--line-length N`: maximum line length (default 120).
+- `--double-quotes`: use double quotes instead of single quotes.
+
+## Ruff
+
+Place this hook before Ruff. Sorting follows `RUF022`; multiline lists use
+trailing commas. Pass `--double-quotes` to match Ruff's default, or configure
+Ruff with `quote-style = "single"`.
