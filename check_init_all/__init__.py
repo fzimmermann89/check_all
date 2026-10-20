@@ -8,6 +8,35 @@ import argparse
 NOQA_ALL_PATTERN = re.compile(r"# noqa: ALL(\[([a-zA-Z0-9_, ]+)\])?")
 
 
+def module_nodes(node: ast.AST):
+    """Walk module code without entering function or class scopes."""
+    yield node
+    for child in ast.iter_child_nodes(node):
+        if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            yield from module_nodes(child)
+
+
+def is_all_statement(node: ast.AST) -> bool:
+    """Identify declarations and direct modifications of module __all__."""
+    if isinstance(node, (ast.Assign, ast.Delete)):
+        targets = node.targets
+    elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+        targets = [node.target]
+    elif (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+          and isinstance(node.value.func, ast.Attribute) and isinstance(node.value.func.value, ast.Name)
+          and node.value.func.attr in {'append', 'extend', 'insert', 'remove', 'pop', 'clear', 'sort', 'reverse',
+                                      '__setitem__', '__delitem__', '__iadd__', '__imul__'}):
+        targets = [node.value.func.value]
+    else:
+        return False
+    for target in targets:
+        while isinstance(target, (ast.Subscript, ast.Attribute)):
+            target = target.value
+        if isinstance(target, ast.Name) and target.id == "__all__":
+            return True
+    return False
+
+
 def _isort_key(name: str) -> tuple[int, tuple[tuple[int | str, ...], ...]]:
     """Sort key reproducing ruff's RUF022 "isort-style" ordering.
 
@@ -48,11 +77,11 @@ def get_all_imports(filepath: Path) -> set[str]:
 
     imports = set()
 
-    for node in ast.walk(tree):
+    for node in module_nodes(tree):
         if isinstance(node, ast.Import):
             # For standard imports like import x
             for alias in node.names:
-                imports.add(alias.asname or alias.name)
+                imports.add(alias.asname or alias.name.split('.')[0])
         elif isinstance(node, ast.ImportFrom):
             # For from x import y statements
             if node.level == 0 and node.module:  # Normal imports like from x import y
@@ -63,9 +92,6 @@ def get_all_imports(filepath: Path) -> set[str]:
                 for alias in node.names:
                     # Same handling for relative imports
                     imports.add(alias.asname or alias.name)
-
-    # Remove any full module paths (if they exist in the imports)
-    imports = {name.split(".")[-1] for name in imports}
 
     return imports
 
@@ -84,9 +110,11 @@ def parse_noqa(comment: str) -> set[str] | str | None:
     A set of ignored symbols if present,
     "ALL" to ignore all checks, or None.
     """
-    match = NOQA_ALL_PATTERN.search(comment)
-    if match:
-        return set(map(str.strip, match.group(2).split(","))) if match.group(2) else "ALL"
+    matches = list(NOQA_ALL_PATTERN.finditer(comment))
+    if matches:
+        if any(not match.group(2) for match in matches):
+            return "ALL"
+        return {symbol.strip() for match in matches for symbol in match.group(2).split(',')}
     return None
 
 
@@ -140,14 +168,16 @@ def get_all_comments(source: str, node: ast.AST) -> list[tokenize.TokenInfo]:
 
 
 def preserve_all_comments(
-    all_string: str, symbols: list[str], node: ast.Assign, comments: list[tokenize.TokenInfo]
+    all_string: str, symbols: list[str], node: ast.AST, comments: list[tokenize.TokenInfo]
 ) -> str:
     """Keep boundary comments and move element comments with their symbols."""
     opening, closing, orphaned = [], [], []
     before, after = {}, {}
+    elements = [elt for elt in getattr(getattr(node, 'value', None), 'elts', [])
+                if isinstance(elt, ast.Constant) and isinstance(elt.value, str)]
     for comment in comments:
         lineno = comment.start[0]
-        previous = [elt for elt in node.value.elts if elt.lineno <= lineno <= elt.end_lineno]
+        previous = [elt for elt in elements if elt.lineno <= lineno <= elt.end_lineno]
         if lineno == node.end_lineno:
             closing.append(comment.string)
         elif lineno == node.lineno and (not previous or parse_noqa(comment.string)):
@@ -159,7 +189,7 @@ def preserve_all_comments(
             else:
                 orphaned.append(comment.string)
         else:
-            following = next((elt for elt in node.value.elts if elt.lineno > lineno), None)
+            following = next((elt for elt in elements if elt.lineno > lineno), None)
             if following is not None and following.value in symbols:
                 before.setdefault(following.value, []).append(comment.string)
             else:
@@ -187,7 +217,7 @@ def preserve_all_comments(
 
 def update_all_in_init(
     filepath: Path, line_length: int = 120, use_double_quotes: bool = True, fix: bool = True
-) -> None:
+) -> bool:
     """
     Validate and update the __all__ variable in a given __init__.py file.
 
@@ -212,33 +242,72 @@ def update_all_in_init(
     tree = ast.parse(source, filename=str(filepath))
     imports = get_all_imports(filepath)
 
-    all_var, all_lineno, noqa_symbols, errors = None, None, set(), []
-    all_start, all_end = None, None
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets):
-            all_var = [elt.value if isinstance(elt, ast.Constant) else elt.s for elt in node.value.elts]
-            all_lineno = node.lineno
-            all_start = node.lineno - 1
-            all_end = node.end_lineno - 1 if hasattr(node, "end_lineno") else all_start
-            comments = get_all_comments(source, node)
-            for comment in comments:
+    all_nodes = [node for node in module_nodes(tree) if is_all_statement(node)]
+    valid_declaration = (
+        len(all_nodes) == 1 and all_nodes[0] in tree.body
+        and isinstance(all_nodes[0], ast.Assign) and len(all_nodes[0].targets) == 1
+        and isinstance(all_nodes[0].targets[0], ast.Name)
+        and isinstance(all_nodes[0].value, ast.List)
+        and all(isinstance(elt, ast.Constant) and isinstance(elt.value, str) for elt in all_nodes[0].value.elts)
+    )
+    if all_nodes and not valid_declaration:
+        comments = [comment for node in all_nodes for comment in get_all_comments(source, node)]
+        noqa_symbols, noqa_comments = set(), []
+        for node in all_nodes:
+            for comment in get_all_comments(source, node):
                 if comment.start[0] in (node.lineno, node.end_lineno):
                     parsed_noqa = parse_noqa(comment.string)
                     if parsed_noqa == "ALL":
-                        return
+                        return False
                     if parsed_noqa:
                         noqa_symbols.update(parsed_noqa)
-            break
+                        noqa_comments.append(comment)
+        comments = [comment for comment in comments if comment not in noqa_comments]
+        print(f"{filepath}:{all_nodes[0].lineno}: error: __all__ must be a single literal list of strings.")
+        if fix:
+            retained = {elt.value for node in all_nodes for elt in ast.walk(node)
+                        if isinstance(elt, ast.Constant) and isinstance(elt.value, str)}
+            new_all = sorted((imports - noqa_symbols) | (retained & noqa_symbols), key=_isort_key)
+            all_string = format_all_string(new_all, line_length, use_double_quotes, multiline=bool(comments))
+            all_string = preserve_all_comments(all_string, new_all, all_nodes[0], comments)
+            if noqa_comments:
+                first_line, *rest = all_string.split('\n')
+                all_string = '\n'.join([first_line + '  ' + ' '.join(comment.string for comment in noqa_comments), *rest])
+            lines = source.splitlines()
+            first = min(node.lineno for node in all_nodes)
+            insert_at = next(node.lineno - 1 for node in tree.body if node.lineno <= first <= node.end_lineno)
+            for node in sorted(all_nodes, key=lambda node: (node.lineno, node.col_offset), reverse=True):
+                prefix = lines[node.lineno - 1].encode('utf-8')[:node.col_offset].decode('utf-8')
+                suffix = lines[node.end_lineno - 1].encode('utf-8')[node.end_col_offset:].decode('utf-8')
+                # Trailing comments move with the regenerated declaration.
+                suffix = suffix.split('#', 1)[0] if suffix.lstrip().startswith('#') else suffix
+                replacement = [prefix + 'pass' + suffix] if prefix.strip() or suffix.strip() or node not in tree.body else []
+                lines[node.lineno - 1:node.end_lineno] = replacement
+            lines[insert_at:insert_at] = [all_string, '']
+            filepath.write_text('\n'.join(lines).rstrip() + '\n')
+        return True
 
-    if all_var is None:
+    if not all_nodes:
         new_all = sorted(imports, key=_isort_key)
         all_string = format_all_string(new_all, line_length, use_double_quotes, multiline=False)
         if fix:
             with filepath.open("w") as file:
                 file.write(source.rstrip() + "\n\n" + all_string + "\n")
         print(f"{filepath}\033[31m error:\033[0m missing __all__")
-        return
+        return True
+
+    node = all_nodes[0]
+    all_var = [elt.value for elt in node.value.elts]
+    all_lineno, all_start, all_end = node.lineno, node.lineno - 1, node.end_lineno - 1
+    comments = get_all_comments(source, node)
+    noqa_symbols = set()
+    for comment in comments:
+        if comment.start[0] in (node.lineno, node.end_lineno):
+            parsed_noqa = parse_noqa(comment.string)
+            if parsed_noqa == "ALL":
+                return False
+            if parsed_noqa:
+                noqa_symbols.update(parsed_noqa)
 
     missing = sorted(imports - set(all_var) - noqa_symbols)
     extra = sorted(set(all_var) - imports - noqa_symbols)
@@ -249,7 +318,17 @@ def update_all_in_init(
     multiline = all_end > all_start
     all_string = format_all_string(updated_all, line_length, use_double_quotes, multiline)
 
-    if fix and (not is_sorted or missing or extra):
+    quote_char = '"' if use_double_quotes else "'"
+    wrong_quotes = any(ast.get_source_segment(source, elt) != f"{quote_char}{elt.value}{quote_char}"
+                       for elt in node.value.elts)
+    if wrong_quotes:
+        print(f"{filepath}:{all_lineno}: error: __all__ must use {'double' if use_double_quotes else 'single'} quotes.")
+    duplicates = len(all_var) != len(set(all_var))
+    if duplicates:
+        print(f"{filepath}:{all_lineno}: error: duplicate symbols in __all__.")
+    has_errors = bool(not is_sorted or missing or extra or wrong_quotes or duplicates)
+
+    if fix and has_errors:
         lines = source.splitlines()
         if comments:
             all_string = preserve_all_comments(all_string, updated_all, node, comments)
@@ -265,6 +344,7 @@ def update_all_in_init(
         lines[pre:all_start] = [""] if pre > 0 else []
         with filepath.open("w") as file:
             file.write("\n".join(lines) + "\n")
+    return has_errors
 
 
 def print_errors(filepath: Path, all_lineno: int, is_sorted: bool, missing: set, extra: set) -> None:
@@ -304,7 +384,7 @@ def print_errors(filepath: Path, all_lineno: int, is_sorted: bool, missing: set,
         )
 
 
-def check_all_in_paths(paths: list[Path], line_length: int, use_double_quotes: bool, fix: bool) -> None:
+def check_all_in_paths(paths: list[Path], line_length: int, use_double_quotes: bool, fix: bool) -> bool:
     """
     Process multiple paths to check and update __init__.py files.
 
@@ -322,14 +402,23 @@ def check_all_in_paths(paths: list[Path], line_length: int, use_double_quotes: b
     fix
         Wether to apply fixes if possible or not
     """
+    has_errors = False
     for path in paths:
         if path.is_file() and path.name == "__init__.py":
-            update_all_in_init(path, line_length, use_double_quotes, fix)
+            init_files = [path]
         elif path.is_dir():
-            for init_file in path.rglob("__init__.py"):
-                update_all_in_init(init_file, line_length, use_double_quotes, fix)
+            init_files = path.rglob("__init__.py")
         else:
             print(f"Warning: {path} is not a valid file or directory.")
+            has_errors = True
+            continue
+        for init_file in init_files:
+            try:
+                has_errors |= update_all_in_init(init_file, line_length, use_double_quotes, fix)
+            except (OSError, UnicodeError, SyntaxError, tokenize.TokenError) as error:
+                print(f"{init_file}: error: {error}")
+                has_errors = True
+    return has_errors
 
 
 def main():
@@ -347,11 +436,14 @@ def main():
         default=120,
         help="Maximum line length for __all__",
     )
-    parser.add_argument(
+    quotes = parser.add_mutually_exclusive_group()
+    quotes.add_argument(
         "--double-quotes",
-        action="store_true",
-        help="Use double quotes for __all__ instead of single quotes",
+        dest="double_quotes", action="store_true", default=True,
+        help="Use double quotes for __all__ (default)",
     )
+    quotes.add_argument('--single-quote', '--single-quotes', dest='double_quotes', action='store_false',
+                        help='Use single quotes for __all__')
     parser.add_argument(
         "--fix",
         "-f",
@@ -360,8 +452,8 @@ def main():
     )
     args = parser.parse_args()
 
-    check_all_in_paths([Path(p) for p in args.paths], args.line_length, args.double_quotes, args.fix)
+    return int(check_all_in_paths([Path(p) for p in args.paths], args.line_length, args.double_quotes, args.fix))
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
